@@ -1,4 +1,3 @@
-# test_savings_goal_tracker.py
 import unittest
 from datetime import datetime
 from currency_converter import CurrencyConverter

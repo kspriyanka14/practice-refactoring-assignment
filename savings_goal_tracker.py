@@ -1,5 +1,5 @@
 import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 class SavingsGoalTracker:
     def __init__(self, currency_converter):
@@ -7,23 +7,41 @@ class SavingsGoalTracker:
         self.goals = {}
         self.goal_id_counter = 0
     
-    # Bad Smell 1: Long Method with too many responsibilities
-    def create_goal(self, user_id, name, target_amount, currency, description=""):
+    def _generate_goal_id(self) -> str:
+        """Generate a unique goal identifier."""
+        self.goal_id_counter += 1
+        return f"GOAL-{self.goal_id_counter}"
+    
+    def _get_current_timestamp(self) -> str:
+        """Get the current timestamp in ISO format."""
+        return datetime.datetime.now().isoformat()
+    
+    def _validate_currency(self, currency: str) -> bool:
+        """Validate that a currency is supported."""
+        try:
+            self.currency_converter.get_rate(currency, "USD")
+            return True
+        except ValueError:
+            return False
+    
+    def _calculate_progress(self, current: float, target: float) -> float:
+        """Calculate progress percentage."""
+        return (current / target) * 100 if target > 0 else 0
+    
+    # Refactored: Shorter method with single responsibility
+    def create_goal(self, user_id: str, name: str, target_amount: float, 
+                   currency: str, description: str = "") -> Optional[Dict]:
+        """Create a new savings goal for a user."""
+        # Validate inputs
         if not user_id or not name or target_amount <= 0 or not currency:
             return None
         
-        # Generate a unique ID for the goal
-        self.goal_id_counter += 1
-        goal_id = f"GOAL-{self.goal_id_counter}"
-        
-        # Initialize the goal with details
-        timestamp = datetime.datetime.now().isoformat()
-        
-        # Check if currency is valid by trying to get its rate to USD
-        try:
-            self.currency_converter.get_rate(currency, "USD")
-        except ValueError:
+        # Validate currency
+        if not self._validate_currency(currency):
             return None
+        
+        goal_id = self._generate_goal_id()
+        timestamp = self._get_current_timestamp()
         
         # Create goal object
         goal = {
@@ -44,29 +62,28 @@ class SavingsGoalTracker:
             self.goals[user_id] = {}
         self.goals[user_id][goal_id] = goal
         
-        # Calculate initial progress
-        progress = 0
-        
-        # Log creation event
-        print(f"Created goal {goal_id} for user {user_id}: {name}, {target_amount} {currency}")
-        
         # Return the goal with calculated progress
+        return self._format_goal_with_progress(goal)
+    
+    # Refactored: Eliminated duplicate code by extracting common functionality
+    def _format_goal_with_progress(self, goal: Dict) -> Dict:
+        """Add progress percentage to a goal object."""
+        progress = self._calculate_progress(goal["current_amount"], goal["target_amount"])
         return {**goal, "progress": progress}
     
-    # Bad Smell 2: Duplicate code and logic
-    def add_contribution(self, user_id, goal_id, amount):
-        # Find the goal
-        if user_id not in self.goals or goal_id not in self.goals[user_id]:
+    def add_contribution(self, user_id: str, goal_id: str, amount: float) -> Optional[Dict]:
+        """Add a contribution to a savings goal."""
+        # Get the goal
+        goal = self._get_goal_dict(user_id, goal_id)
+        if not goal:
             return None
-        
-        goal = self.goals[user_id][goal_id]
         
         # Validate amount
         if amount <= 0:
             return None
         
         # Create contribution record
-        timestamp = datetime.datetime.now().isoformat()
+        timestamp = self._get_current_timestamp()
         contribution = {
             "amount": amount,
             "timestamp": timestamp
@@ -77,41 +94,36 @@ class SavingsGoalTracker:
         goal["updated_at"] = timestamp
         goal["contributions"].append(contribution)
         
-        # Calculate progress
-        progress = (goal["current_amount"] / goal["target_amount"]) * 100
-        
-        # Log contribution
-        print(f"Added contribution of {amount} {goal['currency']} to goal {goal_id}")
-        
-        # Return updated goal with progress
-        return {**goal, "progress": progress}
+        return self._format_goal_with_progress(goal)
     
-    def convert_goal_currency(self, user_id, goal_id, new_currency):
-        # Find the goal
+    def _get_goal_dict(self, user_id: str, goal_id: str) -> Optional[Dict]:
+        """Retrieve a goal dictionary without progress calculation."""
         if user_id not in self.goals or goal_id not in self.goals[user_id]:
             return None
-        
-        goal = self.goals[user_id][goal_id]
+        return self.goals[user_id][goal_id]
+    
+    def convert_goal_currency(self, user_id: str, goal_id: str, new_currency: str) -> Optional[Dict]:
+        """Convert a goal's currency to a different currency."""
+        # Get the goal
+        goal = self._get_goal_dict(user_id, goal_id)
+        if not goal:
+            return None
         
         # Validate currency
-        try:
-            self.currency_converter.get_rate(new_currency, "USD")
-        except ValueError:
+        if not self._validate_currency(new_currency):
             return None
         
         old_currency = goal["currency"]
         
         # Skip if same currency
         if old_currency == new_currency:
-            progress = (goal["current_amount"] / goal["target_amount"]) * 100
-            return {**goal, "progress": progress}
+            return self._format_goal_with_progress(goal)
         
-        # Convert target amount
+        # Convert amounts
         target_result = self.currency_converter.convert(
             goal["target_amount"], old_currency, new_currency
         )
         
-        # Convert current amount
         current_result = self.currency_converter.convert(
             goal["current_amount"], old_currency, new_currency
         )
@@ -120,38 +132,21 @@ class SavingsGoalTracker:
         goal["target_amount"] = target_result["converted_amount"]
         goal["current_amount"] = current_result["converted_amount"]
         goal["currency"] = new_currency
-        goal["updated_at"] = datetime.datetime.now().isoformat()
+        goal["updated_at"] = self._get_current_timestamp()
         
-        # Calculate progress
-        progress = (goal["current_amount"] / goal["target_amount"]) * 100
-        
-        # Log conversion
-        print(f"Converted goal {goal_id} from {old_currency} to {new_currency}")
-        
-        # Return updated goal with progress
-        return {**goal, "progress": progress}
+        return self._format_goal_with_progress(goal)
     
-    def get_goal(self, user_id, goal_id):
-        if user_id not in self.goals or goal_id not in self.goals[user_id]:
+    def get_goal(self, user_id: str, goal_id: str) -> Optional[Dict]:
+        """Get a savings goal with progress calculation."""
+        goal = self._get_goal_dict(user_id, goal_id)
+        if not goal:
             return None
-        
-        goal = self.goals[user_id][goal_id]
-        
-        # Calculate progress
-        progress = (goal["current_amount"] / goal["target_amount"]) * 100
-        
-        # Return goal with progress
-        return {**goal, "progress": progress}
+        return self._format_goal_with_progress(goal)
     
-    def get_all_goals(self, user_id):
+    def get_all_goals(self, user_id: str) -> List[Dict]:
+        """Get all savings goals for a user with progress calculation."""
         if user_id not in self.goals:
             return []
         
-        # Calculate progress for each goal
-        goals_with_progress = []
-        for goal_id, goal in self.goals[user_id].items():
-            progress = (goal["current_amount"] / goal["target_amount"]) * 100
-            goals_with_progress.append({**goal, "progress": progress})
-        
-        return goals_with_progress
-    
+        return [self._format_goal_with_progress(goal) 
+                for goal in self.goals[user_id].values()]
