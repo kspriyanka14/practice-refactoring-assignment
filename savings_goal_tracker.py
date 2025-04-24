@@ -1,4 +1,3 @@
-# savings_goal_tracker.py (Smelly Version)
 import datetime
 from typing import Dict, List, Optional
 
@@ -155,3 +154,4 @@ class SavingsGoalTracker:
             goals_with_progress.append({**goal, "progress": progress})
         
         return goals_with_progress
+    
